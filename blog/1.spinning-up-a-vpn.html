@@ -1,0 +1,199 @@
+<html>
+    <head>
+        <title>post: spinning up a vpn</title>
+    </head>
+    <body>
+        <h1>spinning up a vpn</h1>
+        <span>dated 8th sep 2025</span>
+
+        <p>
+            <em> tldr; a writeup on launching a vpn server on the cheapest vps offering from 
+            <a href="https://digitalocean.com/pricing/droplets">digital ocean</a>, within a 
+            duration of 2 to 3 minutes (when everything is in place), from the comfort of the 
+            smartphone by utilising termux & openvpn-connect apps</em>
+        </p>
+
+        <p>
+            <br> <em>prologue:</em> <br>
+            although i don't aggerssively bat for privacy-friendly altenatives to popular online 
+            services/apps, i have a sweet spot reserved for the apps/services that do only the things 
+            (necessary things) they claim to do and nothing more. the ones that do not 'call home', 
+            do not collect unnecessary data, do not run processes at 1AM everyday, do not show ads 
+            nor push for a subscription but stay contained to their purpose. i have respect towards 
+            such developers who respect their users (and their boundaries) back 
+        </p>
+
+        <p>
+            and once we become developers oursleves (atleast good enough to understand the pieces 
+            that make the whole) a new obsession takes over: to try to replicate the 
+            functionalities of something - completely from scratch or by utilising already 
+            available tools and services. this post is one such instance where i like something and 
+            try to replicate / recreate it partly or fully
+        </p>
+
+        <p>
+            <br> <em>chapter 1: the ask and the offer</em> <br>
+            there are a handful of pretty-good vpn's (protonvpn, mullvad vpn) and also a load full 
+            of shady vpn's, each contributing thier share to unblocking the sites (allowing p2p 
+            traffic) at the cost of few dollars a month or user privacy. but none of the above two 
+            options should restrict us from experimenting and coming up with our own solutions to 
+            solve the already solved problem (but with more control over the process, atleaset 
+            percieved control)
+        </p>
+
+        <p>
+            sure, we can run a vpn server locally on our laptop (or server) but that nullifies the 
+            purpose and the sole reason (one of the) behind running a vpn. i.e., bypassing geoblock. 
+            no, two of the reasons behind running a vpn server are bypassing geoblock and masking 
+            the ip address (although browser fingerprinting goes pretty far to make up for the loss).
+            that leaves us with the option where running a vm/vps (virtual machine / virtual 
+            private server) in the country / region of our choice (and availabilty) and connecting 
+            to it from open source clients (on smartphones / desktop)
+        </p>
+
+        <p>
+            this is where cloud providers such as aws, azure, gcp, digitalocean, linode and others 
+            enter the scene. the minimal and straight scope of this project rules out the big cloud 
+            providers, for being an overkill and that leaves us with digitalocean, linode and 
+            hetzner like mid-sized players who play in vps space and offer per-hour billing. i 
+            chose to go with digitalocean mostly because of the simplicity in its offerings.
+        </p>
+
+        <p>
+            <br> <em>chapter 2: the requirements</em> <br>
+            api keys for digitalocean (web ui works fine too, but hard to programatically operate), 
+            termux (to run python/bash scripts and to get ssh connection to vps) and openvpn connect 
+            (to connect device to the server running vpn server)
+        </p>
+
+        <pre>
+            # 1. create/read/delete vm 
+
+            # 1.1. python script to handle vm creation / deletion (droplet.py)
+            <code>
+                import os
+                import sys
+                import requests
+                from dotenv import load_dotenv
+                
+                load_dotenv()
+                API_TOKEN = os.getenv("ACCESS_TOKEN")
+                url = "https://api.digitalocean.com/v2/droplets"
+                
+                try:
+                    if sys.argv[1] is not None:
+                
+                        headers = {
+                                "Authorization": f"Bearer {API_TOKEN}",
+                                "Content-Type": "application/json"
+                        }
+                
+                        match sys.argv[1]:
+                            case 'create':
+                                data = {
+                                        "name": "cheap-vpn-droplet",
+                                        "region": sys.argv[2],
+                                        "size": "s-1vcpu-512mb-10gb",
+                                        "image": "ubuntu-24-04-x64",
+                                        "ssh_keys": [],
+                                        "backups": False,
+                                        "ipv6": False,
+                                        "monitoring": False
+                                }
+                                response = requests.post(url, headers=headers, json=data)
+                
+                                if response.status_code in [200, 202] :
+                                    droplet = response.json()
+                                    print(droplet)
+                                else:
+                                    print(f"Status Code: {response.status_code}, Error: {response.text}")
+                
+                            case 'list':
+                                response = requests.get(url, headers=headers)
+                
+                                if response.status_code == 200:
+                                    res = response.json()
+                                    try:
+                                        droplet = res['droplets'][0]
+                                        print(f"id: {droplet['id']}, status: {droplet['status']}, ip: {droplet['networks']['v4'][0]['ip_address']}")
+                                    except:
+                                        print(res)
+                
+                            case 'delete':
+                                response = requests.delete(f"{url}/{sys.argv[2]}", headers=headers)
+                
+                                if response.status_code == 204:
+                                    print("droplet deleted successfully")
+                                else:
+                                    print(response.status_code)
+                except:
+                    if sys.argv[1] is None:
+                        print("""
+                        Usage: python3 droplet.py {create|list|delete} [region|-|droplet-id]
+                        > python3 droplet.py create blr1
+                        > python3 droplet.py list
+                        > python3 droplet.py delete 102342321
+                        """)
+                    else:
+                        pass
+            </code>
+
+            # 1.2 environment file (.env)
+            <code>
+                ACCESS_TOKEN=dop_v1_657b0153531efaf70a8e8a2e01dacc69378a5668200c508de816b
+            </code>
+
+            # 1.3 commands to execute in termux
+            <code>
+                [pre-requisites]
+                apt-get update && apt-get upgrade -y
+                apt-get install python3 openssh -y
+                termux-setup-storage
+                
+                [create vm]
+                python3 droplet.py list
+                python3 droplet.py create nyc1
+                python3 droplet.py list
+
+                [establish ssh connection to vps]
+                # default password will be sent via email and must to be changed after first login
+                ssh root@ip-address
+                    wget https://git.io/vpn -O openvpn-install.sh && bash openvpn-install.sh
+                    # installer options
+                        # ipv4 address: public
+                        # protocol: default
+                        # listening port: default
+                        # dns server: 3
+                        # client name: client1
+
+                scp root@ip-address:/root/client1.ovpn .
+                cp client1.ovpn storage/shared/Download
+
+                # open openvpn-connect app and load the .ovpn config file to connect to the vpn 
+                server
+            </code>
+        </pre>
+
+        <p>
+            <br> <em>epilogue:</em> <br>
+            this is neither necessary nor optional but is it worth giving a try ? maybe or 
+            maybe not, but the point here is: to push our ability to understand (and build) the 
+            tools we use and hack around, curiously arranging the pieces to make a mosaic. yes, 5$ 
+            subscription to a vpn provider like mullvad makes the process seamless but it takes out 
+            the joy of building something (when you have the ability and interest in those fields).
+            yt-dlp instead of online youtube-downloader, python script to sync files instead of 
+            syncthing, python script to push files to s3 instead of dropbox, http server 
+            on termux to serve media locally, instead of dedicated apps --- ahh, where can i stop! 
+            this vpn server will run for 4$ a month which would equate to ~50paise / 1 hour 
+        </p>
+
+        <p>
+            this post lacks depth (to some extent it is intended, for i wanted to share the 
+            possibilities rather than create an in-depth tutorial) and assumes knowledge of python 
+            and vps. it also requires termux to be installed on the smartphone (from fdroid). this 
+            post needs polishing and update but not right now. everything works now, when they are 
+            not subjected to any change, <em>in case</em>
+        </p>
+
+    </body>
+</html>
